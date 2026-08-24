@@ -1,5 +1,31 @@
+'use client';
+
+import { useState } from 'react';
+
 const contractAddress = '0x21833f0366e47AE826621A563346b9B107061155';
 const explorerUrl = `https://explorer-bradbury.genlayer.com/address/${contractAddress}`;
+
+type EthereumProvider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+};
+
+declare global {
+  interface Window {
+    ethereum?: EthereumProvider;
+  }
+}
+
+const bradburyChain = {
+  chainId: '0x107d',
+  chainName: 'GenLayer Bradbury Testnet',
+  nativeCurrency: {
+    name: 'GEN',
+    symbol: 'GEN',
+    decimals: 18,
+  },
+  rpcUrls: ['https://rpc-bradbury.genlayer.com'],
+  blockExplorerUrls: ['https://explorer-bradbury.genlayer.com'],
+};
 
 const stats = [
   { label: 'Registered item', value: '01' },
@@ -43,6 +69,93 @@ const items = [
 ];
 
 export default function Home() {
+  const [account, setAccount] = useState('');
+  const [chainReady, setChainReady] = useState(false);
+  const [txHash, setTxHash] = useState('');
+  const [walletMessage, setWalletMessage] = useState('Connect a browser wallet to run a Bradbury network test.');
+  const [isBusy, setIsBusy] = useState(false);
+
+  const shortAccount = account ? `${account.slice(0, 6)}...${account.slice(-4)}` : 'Not connected';
+
+  async function connectWallet() {
+    if (!window.ethereum) {
+      setWalletMessage('No wallet found. Install MetaMask or another EIP-1193 wallet.');
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const accounts = (await window.ethereum.request({
+        method: 'eth_requestAccounts',
+      })) as string[];
+      setAccount(accounts[0] ?? '');
+      setWalletMessage('Wallet connected. Switch to Bradbury to continue.');
+    } catch (error) {
+      setWalletMessage(error instanceof Error ? error.message : 'Wallet connection was rejected.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function switchToBradbury() {
+    if (!window.ethereum) {
+      setWalletMessage('No wallet found. Install MetaMask or another EIP-1193 wallet.');
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      await window.ethereum.request({
+        method: 'wallet_switchEthereumChain',
+        params: [{ chainId: bradburyChain.chainId }],
+      });
+      setChainReady(true);
+      setWalletMessage('Bradbury is active. You can send a test transaction now.');
+    } catch (error) {
+      const maybeCode = typeof error === 'object' && error && 'code' in error ? (error as { code?: number }).code : null;
+      if (maybeCode === 4902) {
+        await window.ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [bradburyChain],
+        });
+        setChainReady(true);
+        setWalletMessage('Bradbury was added to your wallet.');
+      } else {
+        setWalletMessage(error instanceof Error ? error.message : 'Could not switch to Bradbury.');
+      }
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function sendTestTransaction() {
+    if (!window.ethereum || !account) {
+      setWalletMessage('Connect your wallet first.');
+      return;
+    }
+
+    setIsBusy(true);
+    setTxHash('');
+    try {
+      const hash = (await window.ethereum.request({
+        method: 'eth_sendTransaction',
+        params: [
+          {
+            from: account,
+            to: contractAddress,
+            value: '0x0',
+          },
+        ],
+      })) as string;
+      setTxHash(hash);
+      setWalletMessage('Test transaction submitted. Open the hash in GenExplorer.');
+    } catch (error) {
+      setWalletMessage(error instanceof Error ? error.message : 'Transaction was rejected or failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[var(--page)] text-[var(--ink)]">
       <header className="sticky top-0 z-20 border-b border-[var(--line)] bg-[rgba(247,248,244,0.88)] backdrop-blur-xl">
@@ -98,6 +211,53 @@ export default function Home() {
               >
                 See registry
               </a>
+            </div>
+
+            <div className="mt-8 rounded-lg border border-[var(--line)] bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--ink)]">Wallet test</p>
+                  <p className="mt-1 text-sm text-[var(--muted)]">Connected account: {shortAccount}</p>
+                </div>
+                <span className={`w-fit rounded-full px-3 py-1 text-sm font-semibold ${chainReady ? 'bg-[var(--success-bg)] text-[var(--success-ink)]' : 'bg-[#f2efe2] text-[#7a6127]'}`}>
+                  {chainReady ? 'Bradbury ready' : 'Bradbury needed'}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <button
+                  className="min-h-11 rounded-md bg-[var(--ink)] px-4 text-sm font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isBusy}
+                  onClick={connectWallet}
+                  type="button"
+                >
+                  Connect wallet
+                </button>
+                <button
+                  className="min-h-11 rounded-md border border-[var(--line)] bg-white px-4 text-sm font-semibold text-[var(--ink)] transition hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isBusy}
+                  onClick={switchToBradbury}
+                  type="button"
+                >
+                  Add Bradbury
+                </button>
+                <button
+                  className="min-h-11 rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isBusy || !account}
+                  onClick={sendTestTransaction}
+                  type="button"
+                >
+                  Send test tx
+                </button>
+              </div>
+              <p className="mt-3 text-sm leading-6 text-[var(--soft)]">{walletMessage}</p>
+              {txHash ? (
+                <a
+                  className="mt-3 block break-all rounded-md bg-[#f7f8f4] p-3 font-mono text-sm font-semibold text-[var(--accent)]"
+                  href={`https://explorer-bradbury.genlayer.com/tx/${txHash}`}
+                >
+                  {txHash}
+                </a>
+              ) : null}
             </div>
           </div>
 
