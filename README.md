@@ -68,6 +68,7 @@ Import this repository in Vercel and set:
 - Framework Preset: `Next.js`
 - Build Command: `npm run build`
 - Install Command: `npm install`
+- Output Directory: leave empty / default
 
 No environment variables are required for the current static demo frontend.
 
