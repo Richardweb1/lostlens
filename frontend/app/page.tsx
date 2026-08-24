@@ -141,7 +141,11 @@ export default function Home() {
       setAccount(accounts[0] ?? '');
       const activeChain = await window.ethereum.request({ method: 'eth_chainId' });
       setChainId(String(activeChain));
-      setMessage('Wallet connected. Next, switch to Bradbury.');
+      setMessage(
+        String(activeChain).toLowerCase() === bradburyChainId
+          ? 'Wallet and Bradbury are ready. Fill the form, then submit the transaction.'
+          : 'Wallet connected. Click Add Bradbury before submitting.'
+      );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Wallet connection was rejected.');
     } finally {
@@ -247,8 +251,8 @@ export default function Home() {
               Test LostLens with your wallet.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-[var(--soft)]">
-              Connect, switch to Bradbury, submit a 0 GEN test transaction, then open your
-              transaction hash in GenExplorer. No preset item data is required.
+              Connect, switch to Bradbury, fill your own test details, then press Submit
+              transaction. The site will show your transaction hash with a GenExplorer link.
             </p>
           </div>
 
@@ -276,6 +280,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-semibold uppercase text-[var(--accent)]">Test console</p>
               <h2 className="mt-1 text-2xl font-semibold">Start here</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">Complete the steps from left to right, then submit from the form.</p>
             </div>
             <span className={`w-fit rounded-full px-3 py-1 text-sm font-semibold ${isBradbury ? 'bg-[var(--success-bg)] text-[var(--success-ink)]' : 'bg-[#f2efe2] text-[#7a6127]'}`}>
               {isBradbury ? 'Network ready' : 'Needs Bradbury'}
@@ -305,7 +310,7 @@ export default function Home() {
               onClick={sendTestTransaction}
               type="button"
             >
-              Send test tx
+              Quick submit
             </button>
           </div>
 
@@ -368,6 +373,32 @@ export default function Home() {
               value={form.claimProof}
             />
           </label>
+
+          <div className="mt-5 rounded-lg border border-[var(--line)] bg-[#fffaf2] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-base font-semibold">Submit transaction</p>
+                <p className="mt-1 text-sm leading-6 text-[var(--soft)]">
+                  This sends a 0 GEN test transaction to the LostLens contract and returns your hash.
+                </p>
+              </div>
+              <button
+                className="min-h-12 rounded-md bg-[var(--accent)] px-5 font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isBusy || !account || !isBradbury}
+                onClick={sendTestTransaction}
+                type="button"
+              >
+                Submit transaction
+              </button>
+            </div>
+            {!account ? (
+              <p className="mt-3 text-sm text-[#7a6127]">Connect your wallet first.</p>
+            ) : !isBradbury ? (
+              <p className="mt-3 text-sm text-[#7a6127]">Click Add Bradbury before submitting.</p>
+            ) : (
+              <p className="mt-3 text-sm text-[var(--success-ink)]">Ready. Submit now to generate a transaction hash.</p>
+            )}
+          </div>
 
           <div className="mt-6 rounded-lg border border-[var(--line)] bg-[var(--page)] p-4">
             <div className="flex items-center justify-between gap-3">
