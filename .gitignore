@@ -1,0 +1,14 @@
+.pytest_cache/
+artifacts/
+frontend/node_modules/
+frontend/.next/
+frontend/.vercel/
+frontend/.openai/
+frontend/.vinext/
+frontend/.wrangler/
+frontend/dist/
+frontend/package-stage-*/
+frontend/*.tar.gz
+frontend/.git-sites-backup/
+__pycache__/
+*.pyc
