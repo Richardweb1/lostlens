@@ -13,7 +13,8 @@ The current Bradbury contract is:
 ```text
 contracts/LostLens.py        GenLayer intelligent contract
 tests/direct/                Direct-mode contract tests
-frontend/                    Next.js frontend, ready for Vercel
+app/                         Next.js app entry for Vercel
+frontend/                    Same frontend source kept as a workspace copy
 ```
 
 ## Contract
@@ -43,7 +44,6 @@ pytest tests/direct/ -v
 ## Frontend
 
 ```powershell
-cd frontend
 npm install
 npm run dev
 ```
@@ -64,7 +64,7 @@ npm run build
 
 Import this repository in Vercel and set:
 
-- Root Directory: `frontend`
+- Root Directory: leave empty
 - Framework Preset: `Next.js`
 - Build Command: `npm run build`
 - Install Command: `npm install`

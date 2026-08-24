@@ -1,5 +1,8 @@
 .pytest_cache/
 artifacts/
+node_modules/
+.next/
+.vercel/
 frontend/node_modules/
 frontend/.next/
 frontend/.vercel/
