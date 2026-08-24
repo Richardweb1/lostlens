@@ -28,9 +28,9 @@ const bradburyChain = {
 };
 
 const stats = [
-  { label: 'Registered item', value: '01' },
-  { label: 'Accepted claim', value: '01' },
-  { label: 'Match confidence', value: '100%' },
+  { label: 'Registered items', value: '00' },
+  { label: 'Submitted claims', value: '00' },
+  { label: 'Latest verdict', value: '--' },
 ];
 
 const timeline = [
@@ -51,22 +51,7 @@ const timeline = [
   },
 ];
 
-const items = [
-  {
-    id: '00',
-    name: 'Black backpack near library',
-    location: 'Library',
-    status: 'Claimed',
-    verdict: 'STRONG_MATCH',
-  },
-  {
-    id: '01',
-    name: 'Silver laptop sleeve',
-    location: 'Student hub',
-    status: 'Open',
-    verdict: 'Awaiting claim',
-  },
-];
+const items: Array<{ id: string; name: string; location: string; status: string; verdict: string }> = [];
 
 export default function Home() {
   const [account, setAccount] = useState('');
@@ -278,14 +263,14 @@ export default function Home() {
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="text-sm text-[var(--muted)]">Latest outcome</p>
-                  <p className="mt-1 text-xl font-semibold">STRONG_MATCH</p>
+                  <p className="mt-1 text-xl font-semibold">No transactions yet</p>
                 </div>
-                <span className="rounded-full bg-[var(--success-bg)] px-3 py-1 text-sm font-semibold text-[var(--success-ink)]">
-                  claimed
+                <span className="rounded-full bg-[#f2efe2] px-3 py-1 text-sm font-semibold text-[#7a6127]">
+                  empty
                 </span>
               </div>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-[#dde8df]">
-                <div className="h-full w-full rounded-full bg-[var(--success)]" />
+                <div className="h-full w-0 rounded-full bg-[var(--success)]" />
               </div>
             </div>
           </div>
@@ -316,11 +301,12 @@ export default function Home() {
               <h2 className="mt-2 text-3xl font-semibold">Items in the demo ledger</h2>
             </div>
             <p className="max-w-md text-sm leading-6 text-white/60">
-              This Vercel-ready build is a polished product layer. Contract writes can be connected next.
+              New visitors start from a clean slate. Connect a wallet, add Bradbury, then submit their own test transaction.
             </p>
           </div>
-          <div className="mt-8 grid gap-4 lg:grid-cols-2">
-            {items.map((item) => (
+          {items.length ? (
+            <div className="mt-8 grid gap-4 lg:grid-cols-2">
+              {items.map((item) => (
               <article key={item.id} className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -337,34 +323,42 @@ export default function Home() {
                   <p className="mt-1 font-mono text-sm">{item.verdict}</p>
                 </div>
               </article>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-8 rounded-lg border border-dashed border-white/18 bg-white/[0.04] p-8">
+              <p className="text-2xl font-semibold">No public demo items yet.</p>
+              <p className="mt-3 max-w-2xl leading-7 text-white/60">
+                Use the wallet test above to create your own Bradbury transaction hash. The next integration step will read live contract state and render every submitted item here.
+              </p>
+            </div>
+          )}
         </div>
       </section>
 
       <section id="claim" className="mx-auto grid max-w-7xl gap-8 px-5 py-14 sm:px-8 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
           <p className="text-sm font-semibold uppercase text-[var(--accent)]">Claim test</p>
-          <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">A claim form ready for the contract integration.</h2>
+          <h2 className="mt-2 text-3xl font-semibold sm:text-4xl">Start from empty fields and test your own claim.</h2>
           <p className="mt-4 leading-7 text-[var(--soft)]">
-            The next build step is wiring these fields to create_item and submit_claim through
-            the GenLayer client flow you choose for Vercel.
+            Every visitor can connect a wallet, switch to Bradbury, and submit a test transaction.
+            Keep the form blank so they can choose the item and proof they want to try.
           </p>
         </div>
         <form className="rounded-lg border border-[var(--line)] bg-white p-5 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-medium">
               Item ID
-              <input className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]" defaultValue="0" />
+              <input className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]" placeholder="0" />
             </label>
             <label className="block text-sm font-medium">
               Location
-              <input className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]" defaultValue="Library" />
+              <input className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]" placeholder="Where was it found?" />
             </label>
           </div>
           <label className="mt-4 block text-sm font-medium">
             Claimant proof
-            <textarea className="mt-2 min-h-32 w-full rounded-md border border-[var(--line)] p-3 outline-none focus:border-[var(--accent)]" defaultValue="The backpack has a blue keychain inside" />
+            <textarea className="mt-2 min-h-32 w-full rounded-md border border-[var(--line)] p-3 outline-none focus:border-[var(--accent)]" placeholder="Describe the private detail only the owner should know." />
           </label>
           <button className="mt-5 min-h-12 w-full rounded-md bg-[var(--accent)] px-4 font-semibold text-white transition hover:bg-[var(--accent-strong)]" type="button">
             Prepare transaction
