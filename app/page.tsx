@@ -230,20 +230,13 @@ export default function Home() {
               <span className="block text-xs text-[var(--muted)]">Try Bradbury in one flow</span>
             </span>
           </a>
-          <div className="hidden items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--page)] px-3 py-2 text-sm text-[var(--soft)] md:flex">
-            <span className={`h-2.5 w-2.5 rounded-full ${isBradbury ? 'bg-[var(--success)]' : 'bg-[var(--warning)]'}`} />
-            {isBradbury ? 'Bradbury connected' : 'Bradbury not active'}
-          </div>
-          <a
-            className="inline-flex min-h-11 items-center rounded-md bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--accent-strong)]"
-            href={explorerUrl}
-          >
-            Contract
+          <a className="hidden text-sm font-semibold text-[var(--soft)] transition hover:text-[var(--ink)] sm:inline-flex" href="#test">
+            Start test
           </a>
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:py-14">
+      <section id="test" className="mx-auto grid max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:py-14">
         <div className="flex flex-col justify-between rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_24px_80px_rgba(20,32,28,0.08)] sm:p-8">
           <div>
             <div className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-4 text-sm font-medium text-[var(--soft)] shadow-sm">
