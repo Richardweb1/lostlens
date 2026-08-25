@@ -67,6 +67,7 @@ export default function Home() {
   const [chainId, setChainId] = useState('');
   const [message, setMessage] = useState('Connect your wallet, then create or claim a LostLens item.');
   const [isBusy, setIsBusy] = useState(false);
+  const [nextItemId, setNextItemId] = useState<number | null>(null);
   const [form, setForm] = useState<TestForm>(emptyForm);
   const [txs, setTxs] = useState<LocalTx[]>([]);
 
@@ -149,6 +150,16 @@ export default function Home() {
     });
   }
 
+  async function readNextItemId() {
+    const client = createClient({ chain: testnetBradbury });
+    const count = await client.readContract({
+      address: contractAddress,
+      functionName: 'get_item_count',
+      args: [],
+    });
+    return Number(count);
+  }
+
   async function connectWallet() {
     if (!window.ethereum) {
       setMessage('No wallet detected. Install MetaMask or another EIP-1193 wallet.');
@@ -217,6 +228,8 @@ export default function Home() {
 
     setIsBusy(true);
     try {
+      const createdItemId = await readNextItemId();
+      setNextItemId(createdItemId);
       const client = getWriteClient();
       const hash = await client.writeContract({
         address: contractAddress,
@@ -225,8 +238,9 @@ export default function Home() {
         value: BigInt(0),
       });
 
-      saveTx(hash, 'create_item', `Create item: ${form.publicDescription}`);
-      setMessage('create_item submitted. Open the hash below in GenExplorer, then submit a claim when ready.');
+      updateForm('itemId', String(createdItemId));
+      saveTx(hash, 'create_item', `Create item #${createdItemId}: ${form.publicDescription}`);
+      setMessage(`create_item submitted for item #${createdItemId}. Claim form is ready with the correct Item ID.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'create_item was rejected or failed.');
     } finally {
@@ -471,8 +485,10 @@ export default function Home() {
           <div className="mt-6 rounded-lg border border-[var(--line)] bg-[var(--page)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold">Your real contract hashes</p>
-                <p className="mt-1 text-sm text-[var(--muted)]">Saved locally in this browser after each submission.</p>
+              <p className="text-sm font-semibold">Your real contract hashes</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">
+                  Saved locally in this browser. New created item ID: {nextItemId ?? 'read after create'}.
+                </p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">{txs.length}</span>
             </div>
