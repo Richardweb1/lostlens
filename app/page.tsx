@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createClient } from 'genlayer-js';
+import { testnetBradbury } from 'genlayer-js/chains';
 
 const contractAddress = '0x21833f0366e47AE826621A563346b9B107061155';
-const explorerUrl = `https://explorer-bradbury.genlayer.com/address/${contractAddress}`;
 const bradburyChainId = '0x107d';
 
 type EthereumProvider = {
@@ -16,12 +17,14 @@ type TestForm = {
   publicDescription: string;
   hiddenDetail: string;
   location: string;
+  itemId: string;
   claimProof: string;
 };
 
 type LocalTx = {
   hash: string;
   label: string;
+  kind: 'create_item' | 'submit_claim';
   createdAt: string;
 };
 
@@ -47,39 +50,43 @@ const emptyForm: TestForm = {
   publicDescription: '',
   hiddenDetail: '',
   location: '',
+  itemId: '0',
   claimProof: '',
 };
 
 const steps = [
   'Connect wallet',
   'Switch to Bradbury',
-  'Submit test transaction',
-  'Open transaction hash',
+  'Create found item',
+  'Submit claim',
+  'Open hashes',
 ];
 
 export default function Home() {
   const [account, setAccount] = useState('');
   const [chainId, setChainId] = useState('');
-  const [message, setMessage] = useState('Start by connecting your wallet.');
+  const [message, setMessage] = useState('Connect your wallet, then create or claim a LostLens item.');
   const [isBusy, setIsBusy] = useState(false);
   const [form, setForm] = useState<TestForm>(emptyForm);
   const [txs, setTxs] = useState<LocalTx[]>([]);
 
-  const hasWallet = typeof window !== 'undefined' && Boolean(window.ethereum);
   const isBradbury = chainId.toLowerCase() === bradburyChainId;
   const shortAccount = account ? `${account.slice(0, 6)}...${account.slice(-4)}` : 'Not connected';
-  const currentStep = !account ? 0 : !isBradbury ? 1 : txs.length === 0 ? 2 : 3;
+  const createTxCount = txs.filter((tx) => tx.kind === 'create_item').length;
+  const claimTxCount = txs.filter((tx) => tx.kind === 'submit_claim').length;
+  const currentStep = !account ? 0 : !isBradbury ? 1 : createTxCount === 0 ? 2 : claimTxCount === 0 ? 3 : 4;
 
   const formSummary = useMemo(() => {
     const filled = Object.values(form).filter(Boolean).length;
-    return `${filled}/4 fields filled`;
+    return `${filled}/5 fields filled`;
   }, [form]);
 
   useEffect(() => {
     const saved = window.localStorage.getItem('lostlens-local-txs');
     if (saved) {
       try {
-        setTxs(JSON.parse(saved) as LocalTx[]);
+        const parsed = JSON.parse(saved) as LocalTx[];
+        setTxs(parsed.filter((tx) => tx.hash?.startsWith('0x')));
       } catch {
         setTxs([]);
       }
@@ -115,18 +122,31 @@ export default function Home() {
     };
   }, []);
 
-  function saveTx(hash: string) {
+  function saveTx(hash: string, kind: LocalTx['kind'], label: string) {
     const next = [
       {
         hash,
-        label: form.publicDescription || form.claimProof || 'Bradbury wallet test',
+        kind,
+        label,
         createdAt: new Date().toLocaleString(),
       },
       ...txs,
-    ].slice(0, 5);
+    ].slice(0, 8);
 
     setTxs(next);
     window.localStorage.setItem('lostlens-local-txs', JSON.stringify(next));
+  }
+
+  function getWriteClient() {
+    if (!window.ethereum || !account) {
+      throw new Error('Connect your wallet first.');
+    }
+
+    return createClient({
+      chain: testnetBradbury,
+      account: account as `0x${string}`,
+      provider: window.ethereum as never,
+    });
   }
 
   async function connectWallet() {
@@ -143,8 +163,8 @@ export default function Home() {
       setChainId(String(activeChain));
       setMessage(
         String(activeChain).toLowerCase() === bradburyChainId
-          ? 'Wallet and Bradbury are ready. Fill the form, then submit the transaction.'
-          : 'Wallet connected. Click Add Bradbury before submitting.'
+          ? 'Wallet ready. Now create a found item or submit a claim.'
+          : 'Wallet connected. Add Bradbury before sending a LostLens transaction.'
       );
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Wallet connection was rejected.');
@@ -166,7 +186,7 @@ export default function Home() {
         params: [{ chainId: bradburyChain.chainId }],
       });
       setChainId(bradburyChain.chainId);
-      setMessage('Bradbury is active. Fill any fields you want, then send a test transaction.');
+      setMessage('Bradbury is active. Use Create item first, then Submit claim.');
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? (error as { code?: number }).code : null;
       if (code === 4902) {
@@ -175,7 +195,7 @@ export default function Home() {
           params: [bradburyChain],
         });
         setChainId(bradburyChain.chainId);
-        setMessage('Bradbury was added. You can send a test transaction now.');
+        setMessage('Bradbury was added. Use Create item first, then Submit claim.');
       } else {
         setMessage(error instanceof Error ? error.message : 'Could not switch to Bradbury.');
       }
@@ -184,34 +204,67 @@ export default function Home() {
     }
   }
 
-  async function sendTestTransaction() {
-    if (!window.ethereum || !account) {
-      setMessage('Connect your wallet first.');
+  async function createItem() {
+    if (!isBradbury) {
+      setMessage('Switch to Bradbury before creating an item.');
       return;
     }
 
-    if (!isBradbury) {
-      setMessage('Switch to Bradbury before sending the transaction.');
+    if (!form.publicDescription || !form.hiddenDetail || !form.location) {
+      setMessage('Fill public description, hidden owner detail, and location first.');
       return;
     }
 
     setIsBusy(true);
     try {
-      const hash = (await window.ethereum.request({
-        method: 'eth_sendTransaction',
-        params: [
-          {
-            from: account,
-            to: contractAddress,
-            value: '0x0',
-          },
-        ],
-      })) as string;
+      const client = getWriteClient();
+      const hash = await client.writeContract({
+        address: contractAddress,
+        functionName: 'create_item',
+        args: [form.publicDescription, form.hiddenDetail, form.location],
+        value: BigInt(0),
+      });
 
-      saveTx(hash);
-      setMessage('Transaction submitted. Open the hash below in GenExplorer.');
+      saveTx(hash, 'create_item', `Create item: ${form.publicDescription}`);
+      setMessage('create_item submitted. Open the hash below in GenExplorer, then submit a claim when ready.');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Transaction was rejected or failed.');
+      setMessage(error instanceof Error ? error.message : 'create_item was rejected or failed.');
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function submitClaim() {
+    if (!isBradbury) {
+      setMessage('Switch to Bradbury before submitting a claim.');
+      return;
+    }
+
+    const itemId = Number(form.itemId);
+    if (!Number.isInteger(itemId) || itemId < 0) {
+      setMessage('Item ID must be 0 or a positive number.');
+      return;
+    }
+
+    if (!form.claimProof) {
+      setMessage('Fill the claim proof before submitting.');
+      return;
+    }
+
+    setIsBusy(true);
+    try {
+      const client = getWriteClient();
+      const hash = await client.writeContract({
+        address: contractAddress,
+        functionName: 'submit_claim',
+        args: [BigInt(itemId), form.claimProof],
+        value: BigInt(0),
+      });
+
+      saveTx(hash, 'submit_claim', `Claim item #${itemId}`);
+      setMessage('submit_claim submitted. Open the hash below to see consensus status in GenExplorer.');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'submit_claim was rejected or failed.');
     } finally {
       setIsBusy(false);
     }
@@ -231,7 +284,7 @@ export default function Home() {
             </span>
             <span>
               <span className="block text-lg font-semibold leading-tight">LostLens</span>
-              <span className="block text-xs text-[var(--muted)]">Try Bradbury in one flow</span>
+              <span className="block text-xs text-[var(--muted)]">Real Bradbury contract flow</span>
             </span>
           </a>
           <a className="hidden text-sm font-semibold text-[var(--soft)] transition hover:text-[var(--ink)] sm:inline-flex" href="#test">
@@ -240,7 +293,7 @@ export default function Home() {
         </div>
       </header>
 
-      <section id="test" className="mx-auto grid max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:py-14">
+      <section id="test" className="mx-auto grid max-w-7xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.85fr_1.15fr] lg:py-14">
         <div className="flex flex-col justify-between rounded-lg border border-[var(--line)] bg-[var(--panel)] p-6 shadow-[0_24px_80px_rgba(20,32,28,0.08)] sm:p-8">
           <div>
             <div className="mb-6 inline-flex min-h-11 items-center gap-2 rounded-full border border-[var(--line)] bg-white px-4 text-sm font-medium text-[var(--soft)] shadow-sm">
@@ -248,11 +301,11 @@ export default function Home() {
               Live on GenLayer Bradbury
             </div>
             <h1 className="text-5xl font-semibold leading-[1.02] sm:text-6xl">
-              Test LostLens with your wallet.
+              Create and claim a lost item on-chain.
             </h1>
             <p className="mt-5 max-w-2xl text-lg leading-8 text-[var(--soft)]">
-              Connect, switch to Bradbury, fill your own test details, then press Submit
-              transaction. The site will show your transaction hash with a GenExplorer link.
+              Connect a wallet, switch to Bradbury, create a found item, then send a claim for
+              that item. Every action returns a GenExplorer transaction hash.
             </p>
           </div>
 
@@ -278,16 +331,16 @@ export default function Home() {
         <div className="rounded-lg border border-[var(--line)] bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 border-b border-[var(--line)] pb-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold uppercase text-[var(--accent)]">Test console</p>
-              <h2 className="mt-1 text-2xl font-semibold">Start here</h2>
-              <p className="mt-1 text-sm text-[var(--muted)]">Complete the steps from left to right, then submit from the form.</p>
+              <p className="text-sm font-semibold uppercase text-[var(--accent)]">LostLens console</p>
+              <h2 className="mt-1 text-2xl font-semibold">Run the real contract</h2>
+              <p className="mt-1 text-sm text-[var(--muted)]">No preset data. Type your own item and claim proof.</p>
             </div>
             <span className={`w-fit rounded-full px-3 py-1 text-sm font-semibold ${isBradbury ? 'bg-[var(--success-bg)] text-[var(--success-ink)]' : 'bg-[#f2efe2] text-[#7a6127]'}`}>
-              {isBradbury ? 'Network ready' : 'Needs Bradbury'}
+              {isBradbury ? 'Bradbury ready' : 'Needs Bradbury'}
             </span>
           </div>
 
-          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <button
               className="min-h-12 rounded-md bg-[var(--ink)] px-4 font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
               disabled={isBusy}
@@ -302,15 +355,7 @@ export default function Home() {
               onClick={switchToBradbury}
               type="button"
             >
-              Add Bradbury
-            </button>
-            <button
-              className="min-h-12 rounded-md bg-[var(--accent)] px-4 font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isBusy || !account || !isBradbury}
-              onClick={sendTestTransaction}
-              type="button"
-            >
-              Quick submit
+              Add / switch Bradbury
             </button>
           </div>
 
@@ -333,77 +378,100 @@ export default function Home() {
             {message}
           </p>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm font-medium">
-              Public description
+          <div className="mt-6 rounded-lg border border-[var(--line)] bg-[var(--page)] p-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase text-[var(--accent)]">Step 1</p>
+                <h3 className="text-xl font-semibold">Create found item</h3>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">create_item</span>
+            </div>
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="block text-sm font-medium">
+                Public description
+                <input
+                  className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 outline-none focus:border-[var(--accent)]"
+                  onChange={(event) => updateForm('publicDescription', event.target.value)}
+                  placeholder="Black backpack near library"
+                  value={form.publicDescription}
+                />
+              </label>
+              <label className="block text-sm font-medium">
+                Location
+                <input
+                  className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 outline-none focus:border-[var(--accent)]"
+                  onChange={(event) => updateForm('location', event.target.value)}
+                  placeholder="Library"
+                  value={form.location}
+                />
+              </label>
+            </div>
+
+            <label className="mt-4 block text-sm font-medium">
+              Hidden owner detail
               <input
-                className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]"
-                onChange={(event) => updateForm('publicDescription', event.target.value)}
-                placeholder="Example: black backpack near library"
-                value={form.publicDescription}
+                className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 outline-none focus:border-[var(--accent)]"
+                onChange={(event) => updateForm('hiddenDetail', event.target.value)}
+                placeholder="Inside has blue keychain"
+                value={form.hiddenDetail}
               />
             </label>
-            <label className="block text-sm font-medium">
-              Location
-              <input
-                className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]"
-                onChange={(event) => updateForm('location', event.target.value)}
-                placeholder="Where was it found?"
-                value={form.location}
-              />
-            </label>
+
+            <button
+              className="mt-4 min-h-12 w-full rounded-md bg-[var(--accent)] px-5 font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isBusy || !account || !isBradbury}
+              onClick={createItem}
+              type="button"
+            >
+              Create item transaction
+            </button>
           </div>
 
-          <label className="mt-4 block text-sm font-medium">
-            Hidden owner detail
-            <input
-              className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] px-3 outline-none focus:border-[var(--accent)]"
-              onChange={(event) => updateForm('hiddenDetail', event.target.value)}
-              placeholder="Only the real owner should know this"
-              value={form.hiddenDetail}
-            />
-          </label>
-
-          <label className="mt-4 block text-sm font-medium">
-            Claim proof
-            <textarea
-              className="mt-2 min-h-28 w-full rounded-md border border-[var(--line)] p-3 outline-none focus:border-[var(--accent)]"
-              onChange={(event) => updateForm('claimProof', event.target.value)}
-              placeholder="Describe the detail you want validators to compare."
-              value={form.claimProof}
-            />
-          </label>
-
           <div className="mt-5 rounded-lg border border-[var(--line)] bg-[#fffaf2] p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="text-base font-semibold">Submit transaction</p>
-                <p className="mt-1 text-sm leading-6 text-[var(--soft)]">
-                  This sends a 0 GEN test transaction to the LostLens contract and returns your hash.
-                </p>
+                <p className="text-xs font-semibold uppercase text-[var(--accent)]">Step 2</p>
+                <h3 className="text-xl font-semibold">Submit claim</h3>
               </div>
-              <button
-                className="min-h-12 rounded-md bg-[var(--accent)] px-5 font-semibold text-white transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={isBusy || !account || !isBradbury}
-                onClick={sendTestTransaction}
-                type="button"
-              >
-                Submit transaction
-              </button>
+              <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">submit_claim</span>
             </div>
-            {!account ? (
-              <p className="mt-3 text-sm text-[#7a6127]">Connect your wallet first.</p>
-            ) : !isBradbury ? (
-              <p className="mt-3 text-sm text-[#7a6127]">Click Add Bradbury before submitting.</p>
-            ) : (
-              <p className="mt-3 text-sm text-[var(--success-ink)]">Ready. Submit now to generate a transaction hash.</p>
-            )}
+
+            <label className="mt-4 block text-sm font-medium">
+              Item ID
+              <input
+                className="mt-2 min-h-11 w-full rounded-md border border-[var(--line)] bg-white px-3 outline-none focus:border-[var(--accent)]"
+                inputMode="numeric"
+                onChange={(event) => updateForm('itemId', event.target.value)}
+                placeholder="0"
+                value={form.itemId}
+              />
+            </label>
+
+            <label className="mt-4 block text-sm font-medium">
+              Claim proof
+              <textarea
+                className="mt-2 min-h-28 w-full rounded-md border border-[var(--line)] bg-white p-3 outline-none focus:border-[var(--accent)]"
+                onChange={(event) => updateForm('claimProof', event.target.value)}
+                placeholder="The backpack has a blue keychain inside."
+                value={form.claimProof}
+              />
+            </label>
+
+            <button
+              className="mt-4 min-h-12 w-full rounded-md bg-[var(--ink)] px-5 font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={isBusy || !account || !isBradbury}
+              onClick={submitClaim}
+              type="button"
+            >
+              Submit claim transaction
+            </button>
           </div>
 
           <div className="mt-6 rounded-lg border border-[var(--line)] bg-[var(--page)] p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold">Your transaction hashes</p>
+                <p className="text-sm font-semibold">Your real contract hashes</p>
                 <p className="mt-1 text-sm text-[var(--muted)]">Saved locally in this browser after each submission.</p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">{txs.length}</span>
@@ -414,9 +482,12 @@ export default function Home() {
                   <a
                     className="block rounded-md border border-[var(--line)] bg-white p-3 transition hover:border-[var(--accent)]"
                     href={`https://explorer-bradbury.genlayer.com/tx/${tx.hash}`}
-                    key={tx.hash}
+                    key={`${tx.hash}-${tx.createdAt}`}
+                    rel="noreferrer"
+                    target="_blank"
                   >
-                    <span className="block text-sm font-semibold">{tx.label}</span>
+                    <span className="block text-xs font-semibold uppercase text-[var(--accent)]">{tx.kind}</span>
+                    <span className="mt-1 block text-sm font-semibold">{tx.label}</span>
                     <span className="mt-1 block break-all font-mono text-xs text-[var(--accent)]">{tx.hash}</span>
                     <span className="mt-1 block text-xs text-[var(--muted)]">{tx.createdAt}</span>
                   </a>
@@ -424,7 +495,7 @@ export default function Home() {
               </div>
             ) : (
               <p className="mt-4 rounded-md border border-dashed border-[var(--line)] bg-white p-4 text-sm text-[var(--muted)]">
-                No hashes yet. Connect your wallet and send a test transaction.
+                No hashes yet. Create an item or submit a claim to see GenExplorer links here.
               </p>
             )}
           </div>
@@ -438,12 +509,12 @@ export default function Home() {
             <p className="mt-2 break-all font-mono text-sm">{contractAddress}</p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
-            <p className="text-sm text-white/50">What is tested</p>
-            <p className="mt-2 leading-7">Wallet connection, Bradbury chain setup, and transaction hash visibility.</p>
+            <p className="text-sm text-white/50">Real write methods</p>
+            <p className="mt-2 leading-7">create_item(public, hidden, location) and submit_claim(item_id, proof).</p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/[0.06] p-5">
-            <p className="text-sm text-white/50">Next product step</p>
-            <p className="mt-2 leading-7">Wire the form to real LostLens create and claim contract calls.</p>
+            <p className="text-sm text-white/50">What to check</p>
+            <p className="mt-2 leading-7">Open each hash in GenExplorer and wait for accepted or finalized consensus.</p>
           </div>
         </div>
       </section>
