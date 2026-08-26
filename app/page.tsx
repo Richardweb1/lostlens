@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createClient } from 'genlayer-js';
 import { testnetBradbury } from 'genlayer-js/chains';
+import { ExecutionResult, Hash, TransactionStatus } from 'genlayer-js/types';
 
 const contractAddress = '0x21833f0366e47AE826621A563346b9B107061155';
 const bradburyChainId = '0x107d';
@@ -26,6 +27,18 @@ type LocalTx = {
   label: string;
   kind: 'create_item' | 'submit_claim';
   createdAt: string;
+};
+
+type ContractItem = {
+  id: number;
+  public_description: string;
+  location: string;
+  finder: string;
+  status: string;
+  last_verdict: string;
+  last_confidence: number;
+  last_reasoning: string;
+  claim_count: number;
 };
 
 declare global {
@@ -68,6 +81,7 @@ export default function Home() {
   const [message, setMessage] = useState('Connect your wallet, then create or claim a LostLens item.');
   const [isBusy, setIsBusy] = useState(false);
   const [nextItemId, setNextItemId] = useState<number | null>(null);
+  const [verifiedItem, setVerifiedItem] = useState<ContractItem | null>(null);
   const [form, setForm] = useState<TestForm>(emptyForm);
   const [txs, setTxs] = useState<LocalTx[]>([]);
 
@@ -75,7 +89,8 @@ export default function Home() {
   const shortAccount = account ? `${account.slice(0, 6)}...${account.slice(-4)}` : 'Not connected';
   const createTxCount = txs.filter((tx) => tx.kind === 'create_item').length;
   const claimTxCount = txs.filter((tx) => tx.kind === 'submit_claim').length;
-  const currentStep = !account ? 0 : !isBradbury ? 1 : createTxCount === 0 ? 2 : claimTxCount === 0 ? 3 : 4;
+  const currentStep = !account ? 0 : !isBradbury ? 1 : !verifiedItem ? 2 : claimTxCount === 0 ? 3 : 4;
+  const canSubmitClaim = Boolean(account && isBradbury && verifiedItem && verifiedItem.status !== 'claimed');
 
   const formSummary = useMemo(() => {
     const filled = Object.values(form).filter(Boolean).length;
@@ -160,6 +175,32 @@ export default function Home() {
     return Number(count);
   }
 
+  async function readItem(itemId: number) {
+    const client = createClient({ chain: testnetBradbury });
+    const item = await client.readContract({
+      address: contractAddress,
+      functionName: 'get_item',
+      args: [BigInt(itemId)],
+    });
+    return item as ContractItem;
+  }
+
+  async function waitFinalized(hash: string) {
+    const client = createClient({ chain: testnetBradbury });
+    const receipt = await client.waitForTransactionReceipt({
+      hash: hash as Hash,
+      status: TransactionStatus.FINALIZED,
+      interval: 5000,
+      retries: 420,
+    });
+
+    if (receipt.txExecutionResultName === ExecutionResult.FINISHED_WITH_ERROR) {
+      throw new Error('Transaction finalized with contract execution error. Open the hash in GenExplorer for details.');
+    }
+
+    return receipt;
+  }
+
   async function connectWallet() {
     if (!window.ethereum) {
       setMessage('No wallet detected. Install MetaMask or another EIP-1193 wallet.');
@@ -230,6 +271,7 @@ export default function Home() {
     try {
       const createdItemId = await readNextItemId();
       setNextItemId(createdItemId);
+      setVerifiedItem(null);
       const client = getWriteClient();
       const hash = await client.writeContract({
         address: contractAddress,
@@ -240,8 +282,16 @@ export default function Home() {
 
       updateForm('itemId', String(createdItemId));
       saveTx(hash, 'create_item', `Create item #${createdItemId}: ${form.publicDescription}`);
-      setMessage(`create_item submitted for item #${createdItemId}. Claim form is ready with the correct Item ID.`);
+      setMessage(`create_item submitted for item #${createdItemId}. Waiting for finalization before claim.`);
+      await waitFinalized(hash);
+      const item = await readItem(createdItemId);
+      setVerifiedItem(item);
+      updateForm('itemId', String(item.id));
+      setMessage(`Item #${item.id} finalized and verified from contract state. You can submit the claim now.`);
     } catch (error) {
+      setNextItemId(null);
+      setVerifiedItem(null);
+      updateForm('itemId', '');
       setMessage(error instanceof Error ? error.message : 'create_item was rejected or failed.');
     } finally {
       setIsBusy(false);
@@ -257,6 +307,16 @@ export default function Home() {
     const itemId = Number(form.itemId);
     if (!Number.isInteger(itemId) || itemId < 0) {
       setMessage('Item ID must be 0 or a positive number.');
+      return;
+    }
+
+    if (!verifiedItem || verifiedItem.id !== itemId) {
+      setMessage('Create and finalize an item first, or refresh the correct item before claiming.');
+      return;
+    }
+
+    if (verifiedItem.status === 'claimed') {
+      setMessage('This item is already claimed. Create a new item before submitting another claim.');
       return;
     }
 
@@ -276,8 +336,14 @@ export default function Home() {
       });
 
       saveTx(hash, 'submit_claim', `Claim item #${itemId}`);
-      setMessage('submit_claim submitted. Open the hash below to see consensus status in GenExplorer.');
+      setMessage(`submit_claim submitted for item #${itemId}. Waiting for finalization, then reading get_item.`);
+      await waitFinalized(hash);
+      const item = await readItem(itemId);
+      setVerifiedItem(item);
+      setMessage(`Claim finalized. Contract state: ${item.status}; verdict: ${item.last_verdict || 'not available yet'}.`);
     } catch (error) {
+      const item = verifiedItem ? await readItem(verifiedItem.id).catch(() => null) : null;
+      if (item) setVerifiedItem(item);
       setMessage(error instanceof Error ? error.message : 'submit_claim was rejected or failed.');
     } finally {
       setIsBusy(false);
@@ -451,6 +517,27 @@ export default function Home() {
               <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">submit_claim</span>
             </div>
 
+            {!verifiedItem ? (
+              <p className="mt-4 rounded-md border border-[var(--line)] bg-white p-3 text-sm leading-6 text-[var(--soft)]">
+                Create item first. The app will wait for finalization and read `get_item` before enabling this claim.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-3 rounded-md border border-[var(--line)] bg-white p-3 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs uppercase text-[var(--muted)]">Verified item</p>
+                  <p className="mt-1 font-mono text-sm">#{verifiedItem.id}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-[var(--muted)]">Status</p>
+                  <p className="mt-1 text-sm font-semibold">{verifiedItem.status}</p>
+                </div>
+                <div>
+                  <p className="text-xs uppercase text-[var(--muted)]">Verdict</p>
+                  <p className="mt-1 text-sm font-semibold">{verifiedItem.last_verdict || 'Awaiting claim'}</p>
+                </div>
+              </div>
+            )}
+
             <label className="mt-4 block text-sm font-medium">
               Item ID
               <input
@@ -474,7 +561,7 @@ export default function Home() {
 
             <button
               className="mt-4 min-h-12 w-full rounded-md bg-[var(--ink)] px-5 font-semibold text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={isBusy || !account || !isBradbury}
+              disabled={isBusy || !canSubmitClaim}
               onClick={submitClaim}
               type="button"
             >
@@ -487,7 +574,7 @@ export default function Home() {
               <div>
               <p className="text-sm font-semibold">Your real contract hashes</p>
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                  Saved locally in this browser. New created item ID: {nextItemId ?? 'read after create'}.
+                  Saved locally in this browser. Verified item ID: {verifiedItem?.id ?? nextItemId ?? 'read after create'}.
                 </p>
               </div>
               <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold">{txs.length}</span>
